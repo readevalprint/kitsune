@@ -46,12 +46,8 @@ class SolutionResource(Resource):
         qs_without_solutions = qs.exclude(solution__isnull=False)
         qs_with_solutions = qs.filter(solution__isnull=False)
 
-        # Remap
-        w = _remap_date_counts(qs_with_solutions, 'solutions')
-        wo = _remap_date_counts(qs_without_solutions, 'without_solutions')
-
         # Merge
-        return _merge_results(w, wo)
+        return merge_results(solution=qs_with_solutions, without_solutions=qs_without_solutions)
 
     def obj_get_list(self, request=None, **kwargs):
         return self.get_object_list(request)
@@ -81,12 +77,8 @@ class ArticleVotesResource(Resource):
         # Filter on helpful
         qs_helpful_votes = qs.filter(helpful=True)
 
-        # Remap
-        votes = _remap_date_counts(qs, 'votes')
-        helpful = _remap_date_counts(qs_helpful_votes, 'helpful')
-
         # Merge
-        return _merge_results(votes, helpful)
+        return merge_results(votes=qs, helpful=qs_helpful_votes)
 
     def obj_get_list(self, request=None, **kwargs):
         return self.get_object_list(request)
@@ -104,15 +96,21 @@ def _start_date():
     return date(year_ago.year, year_ago.month, 1)
 
 
-def _remap_date_counts(qs, label):
+def _remap_date_counts(**kwargs):
     """Remap the query result.
 
     From: [{'count': 2085, 'month': 11, 'year': 2010},...]
     To: {'<label>': 2085, 'date': '2010-11-01'}
     """
-    return dict((date(x['year'], x['month'], 1), {label: x['count']})
-                for x in qs)
+    for label, qs in kwargs.iteritems():
+        yield dict((date(x['year'], x['month'], 1), {label: x['count']})
+                    for x in qs)
 
+
+def merge_results(**kwargs):
+    res_dict = reduce(_merge_results, _remap_date_counts(**kwargs))
+    res_list = [dict(date=k, **v) for k, v in res_dict.items()]
+    return [Struct(**x) for x in sorted(res_list, key=itemgetter('date'), reverse=True)]
 
 def _merge_results(x, y):
     """Merge query results arrays into one array.
@@ -124,8 +122,6 @@ def _merge_results(x, y):
     To:
         [{"date": "2011-10-01", "votes": 3, "helpful": 7},...]
     """
-    res_dict = dict((s, dict(x.get(s, {}).items() + y.get(s, {}).items()))
+    return dict((s, dict(x.get(s, {}).items() + y.get(s, {}).items()))
                     for s in set(x.keys() + y.keys()))
-    res_list = [dict(date=k, **v) for k, v in res_dict.items()]
-    return [Struct(**x) for x in sorted(res_list, key=itemgetter('date'),
-                                        reverse=True)]
+
